@@ -115,8 +115,8 @@ class ZoneConfig(object):
                         nameserver=ns.dns_name,
                         serial=str(primary_serial)
                     ).set(propagation_delay)
-                    if propagation_delay > 60:
-                        # Only emit warning if at least 60 seconds have passed since last warning
+                    if propagation_delay > 300:
+                        # Only emit warning if at least 5 minutes have passed since last warning
                         last_warning = self._last_warning_time.get(ns.name_server)
                         if last_warning is None or (current_time - last_warning).total_seconds() >= 60:
                             logger.warning(

@@ -180,14 +180,14 @@ def test_check_downstream_propagation_eventually_syncs(mock_sleep: MagicMock, mo
 @patch("propagation_exporter.zone.DNSChecker.resolve_soa_serial")
 @patch("time.sleep", return_value=None)
 def test_check_downstream_propagation_warns_on_long_delay(mock_sleep: MagicMock, mock_resolve: MagicMock, mock_delay_gauge: MagicMock):
-    """Test that warning is logged when propagation delay exceeds 60 seconds (lines 117-124)."""
+    """Test that warning is logged when propagation delay exceeds 5 minutes (300 seconds)."""
     zone_name = "example.com."
     zm = make_zone_manager_single(zone_name)
     zc = zm.zones[zone_name]
 
-    # Set a primary serial and update time more than 60 seconds ago
+    # Set a primary serial and update time more than 5 minutes ago
     zc.primary_nameserver.serial = 200
-    zc.primary_nameserver.update_time = datetime.now() - timedelta(seconds=65)
+    zc.primary_nameserver.update_time = datetime.now() - timedelta(seconds=310)
 
     # Side-effect: first call returns wrong serial (99), second call returns correct serial (200)
     call_count = [0]
@@ -206,12 +206,66 @@ def test_check_downstream_propagation_warns_on_long_delay(mock_sleep: MagicMock,
     with patch("propagation_exporter.zone.logger") as mock_logger:
         zc.check_downstream_propagation()
 
-        # Verify warning was logged for mismatch with delay > 60 seconds
+        # Verify warning was logged for mismatch with delay > 300 seconds
         warning_calls = [call for call in mock_logger.warning.call_args_list
                         if "does not match" in str(call)]
-        assert len(warning_calls) > 0, "Expected warning log for serial mismatch with delay > 60s"
+        assert len(warning_calls) > 0, "Expected warning log for serial mismatch with delay > 300s"
 
     assert zc.synced is True
+
+
+@patch("propagation_exporter.zone.metrics.zone_propagation_delay")
+@patch("propagation_exporter.zone.DNSChecker.resolve_soa_serial")
+@patch("time.sleep", return_value=None)
+def test_check_downstream_propagation_throttles_warnings(mock_sleep: MagicMock, mock_resolve: MagicMock, mock_delay_gauge: MagicMock):
+    """Test that warnings are throttled to once per 60 seconds."""
+
+    zone_name = "example.com."
+    zm = make_zone_manager_single(zone_name)
+    zc = zm.zones[zone_name]
+
+    # Set a primary serial and update time more than 5 minutes ago
+    zc.primary_nameserver.serial = 200
+    initial_time = datetime.now() - timedelta(seconds=310)
+    zc.primary_nameserver.update_time = initial_time
+
+    # Track iterations
+    resolve_call_count = [0]
+
+    def side_effect(zone: str, ns: str, **kwargs: Any):
+        resolve_call_count[0] += 1
+        # Return wrong serial for first 2 iterations, then correct serial
+        if resolve_call_count[0] <= 4:  # 2 iterations * 2 nameservers
+            return 99
+        return 200
+
+    mock_resolve.side_effect = side_effect
+
+    # Mock datetime.now() to simulate time passage
+    with patch("datetime.datetime") as mock_datetime_class:
+        now_call_count = [0]
+
+        def mock_now():
+            now_call_count[0] += 1
+            # First iteration: t=0 (initial check, should warn)
+            if now_call_count[0] <= 4:
+                return initial_time + timedelta(seconds=310)
+            # Second iteration: t=61 (61 seconds later, should warn again)
+            else:
+                return initial_time + timedelta(seconds=371)
+
+        mock_datetime_class.now = mock_now
+        mock_datetime_class.min = datetime.min
+
+        with patch("propagation_exporter.zone.logger") as mock_logger:
+            zc.check_downstream_propagation()
+
+            # Count warnings
+            warning_calls = [call for call in mock_logger.warning.call_args_list
+                            if "does not match" in str(call)]
+
+            # Should have exactly 2 warnings (one at t=0, one at t=61)
+            assert len(warning_calls) == 2, f"Expected 2 warnings due to throttling, got {len(warning_calls)}"
 
 
 def test_update_metrics_skips_until_rr_count():
