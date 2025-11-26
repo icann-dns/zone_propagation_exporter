@@ -118,7 +118,9 @@ class ZoneConfig(object):
                     if propagation_delay > 300:
                         # Only emit warning if at least 5 minutes have passed since last warning
                         last_warning = self._last_warning_time.get(ns.name_server)
-                        if last_warning is None or (current_time - last_warning).total_seconds() >= 60:
+                        if last_warning is None or (
+                            current_time - last_warning
+                        ).total_seconds() >= 60:
                             logger.warning(
                                 "Downstream %s does not match %s: downstream=%s != primary=%s",
                                 ns.name_server,
