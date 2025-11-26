@@ -114,7 +114,6 @@ class ZoneConfig(object):
                         zone=zone,
                         nameserver=ns.dns_name,
                         serial=str(primary_serial),
-                        synced="no",
                     ).set(propagation_delay)
                     if propagation_delay > 300:
                         # Only emit warning if at least 5 minutes have passed since last warning
@@ -147,14 +146,16 @@ class ZoneConfig(object):
                 ns.serial = downstream_serial
                 ns.update_time = datetime.now()
 
-                # Calculate and set the final propagation delay for this nameserver
-                propagation_delay = (ns.update_time - primary_update_time).total_seconds()
+                # Clear the propagation delay metric since nameserver is now synced
+                # This ensures the metric only shows when zones are NOT in sync
                 metrics.zone_propagation_delay.labels(
                     zone=zone,
                     nameserver=ns.dns_name,
                     serial=str(primary_serial),
-                    synced="yes",
-                ).set(propagation_delay)
+                ).set(0)
+
+                # Calculate the final propagation delay for logging
+                propagation_delay = (ns.update_time - primary_update_time).total_seconds()
                 logger.debug(
                     "Zone %s: %s propagation delay: %.2f seconds",
                     zone, ns.dns_name, propagation_delay
