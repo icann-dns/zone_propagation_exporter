@@ -22,7 +22,7 @@ def test_journal_reader_processes_stats_entries(MockReader: MagicMock):
     zone_name = "example.com."
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
     zone_manager = ZoneManager({zone_name: zc})
 
     # Mock the journal reader
