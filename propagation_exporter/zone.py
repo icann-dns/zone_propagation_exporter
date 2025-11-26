@@ -134,7 +134,7 @@ class ZoneConfig(object):
                 # Nameserver is now synced - record the delay at this moment
                 # Only log if we haven't already logged sync for this serial
                 if self._synced_logged.get(ns.name_server) != downstream_serial:
-                    logger.info(
+                    logger.debug(
                         "Downstream %s is synced for %s: downstream=%s == primary=%s",
                         ns.name_server,
                         zone,
@@ -166,6 +166,7 @@ class ZoneConfig(object):
             metrics.zone_in_sync.labels(zone=zone).set(1 if self.synced else 0)
 
             if self.synced:
+                logger.info("Zone %s fully propagated to all downstream nameservers", zone)
                 break
             sleep(0.5)
 
