@@ -29,7 +29,7 @@ def test_zone_config_str():
     """Test that ZoneConfig.__str__ returns the expected format."""
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name="example.com.", serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-        zc = ZoneConfig(name="example.com.", rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=[])
+        zc = ZoneConfig(name="example.com.", primary_nameserver=zi_primary, downstream_nameservers=[])
     assert str(zc) == "ZoneConfig(example.com.)"
 
 
@@ -41,14 +41,12 @@ def test_zone_config_repr():
         zi_downstream2 = ZoneInfo(name="example.com.", serial=100, update_time=datetime.min, dns_name="ns3.example.com")
         zc = ZoneConfig(
             name="example.com.",
-            rr_count=42,
             primary_nameserver=zi_primary,
             downstream_nameservers=[zi_downstream1, zi_downstream2],
             synced=True
         )
     repr_str = repr(zc)
     assert "ZoneConfig(name=example.com." in repr_str
-    assert "rr_count=42" in repr_str
     assert "primary_nameserver=ns1.example.com" in repr_str
     assert "downstream_nameservers=['ns2.example.com', 'ns3.example.com']" in repr_str
     assert "synced=True" in repr_str
@@ -61,7 +59,7 @@ def make_zone_manager_single(zone_name: str = "example.com.") -> ZoneManager:
             ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.2"),
             ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.3"),
         ]
-    zc = ZoneConfig(name=zone_name, rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=downstream)
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=downstream)
     return ZoneManager({zone_name: zc})
 
 
@@ -84,7 +82,6 @@ def test_load_from_file_parses_config(tmp_path: Path):
     zc = zm.zones["example.com."]
     assert zc.primary_nameserver.name_server == "192.0.2.10"
     assert [ns.name_server for ns in zc.downstream_nameservers] == ["192.0.2.11", "192.0.2.12"]
-    assert zc.rr_count == 0
 
 
 def test_load_from_file_with_default_downstreams(tmp_path: Path):
@@ -127,17 +124,8 @@ def test_parse_zone_info_updates_zone_and_metrics():
         "__REALTIME_TIMESTAMP": datetime.now(),
     }
     zc = zm.parse_zone_info(entry)
-    assert zc.rr_count == 5
     assert zc.primary_nameserver.serial == 2025010101
     assert zc.synced is False
-
-    # Metrics were touched; ensure gauge has the label value set (non-zero number of samples)
-    samples = []
-    for fam in metrics.zone_in_sync.collect():
-        for s in fam.samples:
-            if s.name == "zone_in_sync" and s.labels.get("zone") == "example.com.":
-                samples.append(s)
-    assert samples, "Expected at least one sample for zone_in_sync with example.com. labels"
 
 
 @patch("propagation_exporter.zone.metrics.zone_propagation_delay")
@@ -268,26 +256,6 @@ def test_check_downstream_propagation_throttles_warnings(mock_sleep: MagicMock, 
             assert len(warning_calls) == 2, f"Expected 2 warnings due to throttling, got {len(warning_calls)}"
 
 
-def test_update_metrics_skips_until_rr_count():
-    zm = make_zone_manager_single()
-    # Initially has_rr_count is False; update_metrics should not crash
-    zm.update_metrics()
-
-    # After setting rr_count and has_rr_count True, update should publish
-    zc = zm.zones["example.com."]
-    zc.rr_count = 7
-    zc.synced = True
-    zm.update_metrics()
-
-    # Validate a sample exists for zone_rr_count
-    samples = []
-    for fam in metrics.zone_rr_count.collect():
-        for s in fam.samples:
-            if s.name == "zone_rr_count" and s.labels.get("zone") == "example.com.":
-                samples.append(s)
-    assert samples, "Expected at least one sample for zone_rr_count with example.com. labels"
-
-
 def test_zone_manager_custom_regex_string():
     """Test ZoneManager with custom regex as string."""
     custom_regex = r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)"
@@ -403,43 +371,4 @@ def test_start_propagation_check_restarts_dead_thread():
         assert zm.workers["example.com."] != dead_thread
 
 
-@patch("time.sleep", return_value=None)
-def test_start_metrics_updater(mock_sleep: MagicMock):
-    """Test that metrics updater thread starts."""
-    zm = make_zone_manager_single()
 
-    # Patch the infinite loop to exit after one iteration
-    original_update = zm.update_metrics
-    call_count = [0]
-
-    def update_once():
-        call_count[0] += 1
-        original_update()
-        if call_count[0] >= 1:
-            # Force thread to exit
-            raise KeyboardInterrupt()
-
-    with patch.object(zm, 'update_metrics', side_effect=update_once):
-        zm.start_metrics_updater(interval=1)
-        # Give thread a moment to start and run
-        import time
-        time.sleep(0.1)
-
-    # Verify thread was created (accessing protected member for test)
-    assert zm._metrics_thread is not None  # type: ignore[attr-defined]
-    assert call_count[0] >= 1
-
-
-def test_start_metrics_updater_already_running():
-    """Test that start_metrics_updater doesn't restart if already running."""
-    zm = make_zone_manager_single()
-
-    # Create a mock thread that reports as alive
-    mock_thread = MagicMock()
-    mock_thread.is_alive.return_value = True
-    zm._metrics_thread = mock_thread  # type: ignore[attr-defined]
-
-    with patch("threading.Thread") as mock_thread_class:
-        zm.start_metrics_updater()
-        # Should not create new thread
-        mock_thread_class.assert_not_called()

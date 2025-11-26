@@ -63,7 +63,7 @@ def test_journal_reader_skips_non_stats_entries(MockReader: MagicMock):
     zone_name = "example.com."
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
     zone_manager = ZoneManager({zone_name: zc})
 
     mock_journal = MockReader.return_value
@@ -101,7 +101,7 @@ def test_journal_reader_handles_parse_errors(MockReader: MagicMock):
     zone_name = "example.com."
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
     zone_manager = ZoneManager({zone_name: zc})
 
     mock_journal = MockReader.return_value
@@ -137,7 +137,7 @@ def test_journal_reader_custom_pattern(MockReader: MagicMock):
     zone_name = "example.com."
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
     zone_manager = ZoneManager({zone_name: zc})
 
     # Use custom pattern
@@ -157,7 +157,7 @@ def test_journal_reader_skips_non_append_events(MockReader: MagicMock):
     zone_name = "example.com."
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, rr_count=0, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
     zone_manager = ZoneManager({zone_name: zc})
 
     mock_journal = MockReader.return_value

@@ -48,12 +48,10 @@ class ZoneConfig(object):
         name: str,
         primary_nameserver: ZoneInfo,
         downstream_nameservers: List[ZoneInfo],
-        rr_count: int = 0,
         # Assume the zone is in sync initially
         synced: bool = True,
     ) -> None:
         self.name = name
-        self.rr_count = rr_count
         self.primary_nameserver = primary_nameserver
         self.downstream_nameservers = downstream_nameservers
         self.synced = synced
@@ -64,7 +62,7 @@ class ZoneConfig(object):
 
     def __repr__(self) -> str:
         return (
-            f"ZoneConfig(name={self.name}, rr_count={self.rr_count}, "
+            f"ZoneConfig(name={self.name}, "
             f"primary_nameserver={self.primary_nameserver.dns_name}, "
             f"downstream_nameservers={[ns.dns_name for ns in self.downstream_nameservers]}, "
             f"synced={self.synced})"
@@ -110,11 +108,12 @@ class ZoneConfig(object):
 
                     # Update propagation delay metric (still propagating)
                     propagation_delay = (current_time - primary_update_time).total_seconds()
-                    metrics.zone_propagation_delay.labels(
-                        zone=zone,
-                        nameserver=ns.dns_name,
-                        serial=str(primary_serial),
-                    ).set(propagation_delay)
+                    for metric in [metrics.zone_propagation_delay, metrics.zone_in_sync]:
+                        metric.labels(
+                            zone=zone,
+                            nameserver=ns.dns_name,
+                            serial=str(primary_serial),
+                        ).set(propagation_delay)
                     if propagation_delay > 300:
                         # Only emit warning if at least 5 minutes have passed since last warning
                         last_warning = self._last_warning_time.get(ns.name_server)
@@ -156,6 +155,11 @@ class ZoneConfig(object):
 
                 # Calculate the final propagation delay for logging
                 propagation_delay = (ns.update_time - primary_update_time).total_seconds()
+                metrics.zone_in_sync.labels(
+                    zone=zone,
+                    nameserver=ns.dns_name,
+                    serial=str(primary_serial),
+                ).set(propagation_delay)
                 logger.debug(
                     "Zone %s: %s propagation delay: %.2f seconds",
                     zone, ns.dns_name, propagation_delay
@@ -164,9 +168,6 @@ class ZoneConfig(object):
             # Check if all nameservers have synced by comparing serials
             self.synced = all(ns.serial == primary_serial for ns in self.downstream_nameservers)
             logger.debug("Zone %s synced flag set to %s", zone, self.synced)
-
-            # Update the sync status metric
-            metrics.zone_in_sync.labels(zone=zone).set(1 if self.synced else 0)
 
             if self.synced:
                 logger.info("Zone %s fully propagated to all downstream nameservers", zone)
@@ -185,7 +186,6 @@ class ZoneManager(object):
     ) -> None:
         self.zones = zones
         self.workers: Dict[str, threading.Thread] = {}
-        self._metrics_thread: Optional[threading.Thread] = None
         # Regex used to parse journal entries for zone updates
         if zone_stats_regex is None:
             self.zone_stats_regex = DEFAULT_ZONE_STATS_REGEX
@@ -218,7 +218,6 @@ class ZoneManager(object):
             logger.debug(f"Loaded zone configuration for {zone}: {config}")
             zones[zone] = ZoneConfig(
                 name=zone,
-                rr_count=0,
                 primary_nameserver=ZoneInfo(
                     name=zone,
                     serial=0,
@@ -263,7 +262,6 @@ class ZoneManager(object):
 
         zone = match.group('zone')
         serial = match.group('serial')
-        rr_count = int(match.group('rr_count'))
 
         if zone not in self.zones:
             raise ValueError(f"Zone {zone} not found in zone configurations")
@@ -271,43 +269,8 @@ class ZoneManager(object):
         update_time = entry['__REALTIME_TIMESTAMP']
 
         zone_config = self.zones[zone]
-        zone_config.rr_count = rr_count
         zone_config.synced = False
         zone_config.primary_nameserver.serial = int(serial)
         zone_config.primary_nameserver.update_time = update_time
 
-        # Update Prometheus metrics
-        metrics.zone_rr_count.labels(zone=zone).set(zone_config.rr_count)
-        # Mark as not synced initially when zone is updated
-        metrics.zone_in_sync.labels(zone=zone).set(0)
-
         return zone_config
-
-    def update_metrics(self) -> None:
-        """Update Prometheus metrics for all zones."""
-        for zone_name, zone_config in self.zones.items():
-            # Only export RR count metric if we've parsed it from the journal
-            metrics.zone_in_sync.labels(zone=zone_name).set(1 if zone_config.synced else 0)
-            metrics.zone_rr_count.labels(zone=zone_name).set(zone_config.rr_count)
-            logger.debug(
-                "Updated metric for zone %s: rr_count=%d, synced=%s",
-                zone_name, zone_config.rr_count, zone_config.synced
-            )
-
-    def start_metrics_updater(self, interval: int = 60) -> None:
-        """Start a background thread to update Prometheus metrics periodically."""
-        from time import sleep
-
-        def metrics_updater():
-            while True:
-                sleep(interval)
-                self.update_metrics()
-
-        if self._metrics_thread is None or not self._metrics_thread.is_alive():
-            self._metrics_thread = threading.Thread(
-                target=metrics_updater,
-                name="metrics-updater",
-                daemon=True,
-            )
-            self._metrics_thread.start()
-            logger.info("Started Prometheus metrics updater (interval: %ds)", interval)

@@ -110,9 +110,6 @@ def main() -> None:
     )
     journal_reader = JournalReader(zone_manager)
 
-    # Start metrics updater thread
-    zone_manager.start_metrics_updater()
-
     journal_thread = threading.Thread(
         target=journal_reader.run,
         name="journal-reader",

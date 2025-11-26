@@ -149,9 +149,6 @@ def test_main_journal_mode(mock_http: MagicMock, mock_load: MagicMock,
     # Verify zone manager loaded
     mock_load.assert_called_once()
 
-    # Verify metrics updater started
-    mock_zone_manager.start_metrics_updater.assert_called_once()
-
     # Verify journal reader created
     mock_journal.assert_called_once_with(mock_zone_manager)
 
