@@ -113,7 +113,8 @@ class ZoneConfig(object):
                     metrics.zone_propagation_delay.labels(
                         zone=zone,
                         nameserver=ns.dns_name,
-                        serial=str(primary_serial)
+                        serial=str(primary_serial),
+                        synced="no",
                     ).set(propagation_delay)
                     if propagation_delay > 300:
                         # Only emit warning if at least 5 minutes have passed since last warning
@@ -151,7 +152,8 @@ class ZoneConfig(object):
                 metrics.zone_propagation_delay.labels(
                     zone=zone,
                     nameserver=ns.dns_name,
-                    serial=str(primary_serial)
+                    serial=str(primary_serial),
+                    synced="yes",
                 ).set(propagation_delay)
                 logger.debug(
                     "Zone %s: %s propagation delay: %.2f seconds",

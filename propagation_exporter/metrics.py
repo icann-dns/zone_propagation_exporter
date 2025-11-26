@@ -14,5 +14,5 @@ zone_in_sync = Gauge(
 zone_propagation_delay = Gauge(
     'zone_propagation_delay_seconds',
     'Time in seconds since zone was updated on primary',
-    ['zone', 'nameserver', 'serial']
+    ['zone', 'nameserver', 'serial', 'synced']
 )
