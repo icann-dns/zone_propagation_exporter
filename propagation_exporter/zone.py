@@ -3,6 +3,7 @@ import re
 import threading
 from datetime import datetime
 from pathlib import Path
+from time import sleep
 from typing import Any, Dict, List, Optional, Pattern, Union
 
 import yaml
@@ -58,6 +59,8 @@ class ZoneConfig(object):
         self.synced = synced
         # Track last warning time per nameserver to throttle warnings
         self._last_warning_time: Dict[str, datetime] = {}
+        # Track which nameservers have been logged as synced for current serial
+        self._synced_logged: Dict[str, int] = {}
 
     def __repr__(self) -> str:
         return (
@@ -77,11 +80,8 @@ class ZoneConfig(object):
         primary_update_time = self.primary_nameserver.update_time
         self.synced = False
 
-        from datetime import datetime as _dt
-        from time import sleep
-
         while True:
-            current_time = _dt.now()
+            current_time = datetime.now()
 
             for ns in self.downstream_nameservers:
                 # Skip if this nameserver has already synced (its serial matches primary)
@@ -106,7 +106,7 @@ class ZoneConfig(object):
                 )
                 if downstream_serial != primary_serial:
                     ns.serial = downstream_serial
-                    ns.update_time = _dt.now()
+                    ns.update_time = datetime.now()
 
                     # Update propagation delay metric (still propagating)
                     propagation_delay = (current_time - primary_update_time).total_seconds()
@@ -130,15 +130,19 @@ class ZoneConfig(object):
                     continue
 
                 # Nameserver is now synced - record the delay at this moment
-                logger.info(
-                    "Downstream %s is synced for %s: downstream=%s == primary=%s",
-                    ns.name_server,
-                    zone,
-                    downstream_serial,
-                    primary_serial,
-                )
+                # Only log if we haven't already logged sync for this serial
+                if self._synced_logged.get(ns.name_server) != downstream_serial:
+                    logger.info(
+                        "Downstream %s is synced for %s: downstream=%s == primary=%s",
+                        ns.name_server,
+                        zone,
+                        downstream_serial,
+                        primary_serial,
+                    )
+                    self._synced_logged[ns.name_server] = downstream_serial
+
                 ns.serial = downstream_serial
-                ns.update_time = _dt.now()
+                ns.update_time = datetime.now()
 
                 # Calculate and set the final propagation delay for this nameserver
                 propagation_delay = (ns.update_time - primary_update_time).total_seconds()
@@ -147,7 +151,7 @@ class ZoneConfig(object):
                     nameserver=ns.dns_name,
                     serial=str(primary_serial)
                 ).set(propagation_delay)
-                logger.info(
+                logger.debug(
                     "Zone %s: %s propagation delay: %.2f seconds",
                     zone, ns.dns_name, propagation_delay
                 )
