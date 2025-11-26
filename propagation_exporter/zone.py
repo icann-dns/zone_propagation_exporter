@@ -56,6 +56,8 @@ class ZoneConfig(object):
         self.primary_nameserver = primary_nameserver
         self.downstream_nameservers = downstream_nameservers
         self.synced = synced
+        # Track last warning time per nameserver to throttle warnings
+        self._last_warning_time: Dict[str, datetime] = {}
 
     def __repr__(self) -> str:
         return (
@@ -114,13 +116,17 @@ class ZoneConfig(object):
                         serial=str(primary_serial)
                     ).set(propagation_delay)
                     if propagation_delay > 60:
-                        logger.warning(
-                            "Downstream %s does not match %s: downstream=%s != primary=%s",
-                            ns.name_server,
-                            zone,
-                            downstream_serial,
-                            primary_serial,
-                        )
+                        # Only emit warning if at least 60 seconds have passed since last warning
+                        last_warning = self._last_warning_time.get(ns.name_server)
+                        if last_warning is None or (current_time - last_warning).total_seconds() >= 60:
+                            logger.warning(
+                                "Downstream %s does not match %s: downstream=%s != primary=%s",
+                                ns.name_server,
+                                zone,
+                                downstream_serial,
+                                primary_serial,
+                            )
+                            self._last_warning_time[ns.name_server] = current_time
                     continue
 
                 # Nameserver is now synced - record the delay at this moment
