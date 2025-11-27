@@ -1,10 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
-from textwrap import dedent
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
-
-import yaml
 
 from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
 
