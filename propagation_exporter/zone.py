@@ -58,7 +58,7 @@ class ZoneConfig(object):
         )
 
     def __str__(self) -> str:
-        return f"ZoneConfig({self.name})"
+        return f"ZoneConfig({self.name}, {self.primary_nameserver.serial})"
 
     def check_downstream_propagation(self) -> None:
         """Check if the zone is properly propagated to all downstream nameservers."""

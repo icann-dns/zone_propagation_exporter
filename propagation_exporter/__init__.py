@@ -15,4 +15,4 @@ __all__ = [
 ]
 
 # Package version
-__version__ = "0.7.0_rc1"
+__version__ = "0.7.0"

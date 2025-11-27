@@ -28,7 +28,7 @@ def test_zone_config_str():
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
         zi_primary = ZoneInfo(name="example.com.", serial=0, update_time=datetime.min, dns_name="192.0.2.1")
         zc = ZoneConfig(name="example.com.", primary_nameserver=zi_primary, downstream_nameservers=[])
-    assert str(zc) == "ZoneConfig(example.com.)"
+    assert str(zc) == "ZoneConfig(example.com., 0)"
 
 
 def test_zone_config_repr():
