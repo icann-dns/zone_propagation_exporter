@@ -13,3 +13,6 @@ __all__ = [
     "ZoneInfo",
     "ZoneConfig",
 ]
+
+# Package version
+__version__ = "0.7.0_rc1"

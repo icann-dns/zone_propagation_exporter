@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml  # type: ignore[import-untyped]
 from prometheus_client import start_http_server  # type: ignore[import-untyped]
 
+from . import __version__
 from .dns_utils import DNSChecker
 from .journal import JournalReader
 from .zone import ZoneManager
@@ -39,6 +40,9 @@ def get_args() -> Namespace:  # pragma: no cover
         description="Propagation exporter: journal reader and metrics emitter"
     )
     parser.add_argument('-v', '--verbose', action='count', default=0)
+    parser.add_argument(
+        '-V', '--version', action='version', version=f"%(prog)s {__version__}"
+    )
     parser.add_argument(
         '-c', '--config-file', type=Path,
         default=Path('/etc/coralogix-exporter/zones.yaml'),
@@ -80,6 +84,7 @@ def main() -> None:
     args = get_args()
     log_level = get_log_level(args.verbose)
     configure_logging(log_level)
+    logging.info("Propagation Exporter version %s", __version__)
 
     # Quick SOA check mode if --zone and at least one --ns provided
     if args.zone and args.nameservers:
