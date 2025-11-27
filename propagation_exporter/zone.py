@@ -1,24 +1,15 @@
 import logging
-import re
 import threading
 from datetime import datetime
-from pathlib import Path
 from time import sleep
-from typing import Any, Dict, List, Optional, Pattern, Union
-
-import yaml
+from typing import Any, Dict, List
 
 from . import metrics
 from .dns_utils import DNSChecker
 
 logger = logging.getLogger(__name__)
 
-# Default regex used to parse journal "[STATS]" lines for zone updates.
-# Example line:
-# [STATS] example.com 2024072826 RR[count=4 time=0(sec)] ...
-DEFAULT_ZONE_SERIAL_REGEX = re.compile(
-    r"^\[STATS\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)"
-)
+
 
 
 class ZoneInfo(object):
@@ -191,32 +182,20 @@ class ZoneManager(object):
     def __init__(
         self,
         zones: Dict[str, ZoneConfig],
-        *,
-        zone_serial_regex: Optional[Union[str, Pattern[str]]] = None
     ) -> None:
         self.zones = zones
         self.workers: Dict[str, threading.Thread] = {}
-        # Regex used to parse journal entries for zone updates
-        if zone_serial_regex is None:
-            self.zone_serial_regex = DEFAULT_ZONE_SERIAL_REGEX
-        elif isinstance(zone_serial_regex, str):
-            self.zone_serial_regex = re.compile(zone_serial_regex)
-        else:
-            self.zone_serial_regex = zone_serial_regex
+        # Parsing of journal lines happens in JournalReader
 
     @staticmethod
-    def load_from_file(
-        config_file: Path,
-        *,
-        zone_serial_regex: Optional[Union[str, Pattern[str]]] = None
+    def load_from_config(
+        config: Dict[str, Any],
     ) -> 'ZoneManager':
         """Load zone configuration from a YAML file and return a ZoneManager."""
-        zones_config = yaml.safe_load(config_file.read_text())
         zones: Dict[str, ZoneConfig] = {}
         default_downstreams: List['ZoneInfo'] = []
-        zone_serial_regex = zones_config.get('zone_serial_regex', zone_serial_regex)
 
-        for ns in zones_config.get('default_downstream_nameservers', []):
+        for ns in config.get('default_downstream_nameservers', []):
             default_downstreams.append(
                 ZoneInfo(
                     name="",
@@ -225,15 +204,15 @@ class ZoneManager(object):
                     dns_name=ns,
                 )
             )
-        for zone, config in zones_config['zones'].items():
-            logger.debug(f"Loaded zone configuration for {zone}: {config}")
+        for zone, zone_config in config['zones'].items():
+            logger.debug(f"Loaded zone configuration for {zone}: {zone_config}")
             zones[zone] = ZoneConfig(
                 name=zone,
                 primary_nameserver=ZoneInfo(
                     name=zone,
                     serial=0,
                     update_time=datetime.min,
-                    dns_name=zones_config['primary_nameserver'],
+                    dns_name=config['primary_nameserver'],
                 ),
                 downstream_nameservers=[
                     ZoneInfo(
@@ -241,10 +220,10 @@ class ZoneManager(object):
                         serial=0,
                         update_time=datetime.min,
                         dns_name=ns,
-                    ) for ns in config.get('downstream_nameservers', [])
+                    ) for ns in zone_config.get('downstream_nameservers', [])
                 ] + default_downstreams,
             )
-        return ZoneManager(zones, zone_serial_regex=zone_serial_regex)
+        return ZoneManager(zones)
 
     def start_propagation_check(self, zone_config: ZoneConfig) -> None:
         """Start or restart a propagation check thread for a zone."""
@@ -262,26 +241,10 @@ class ZoneManager(object):
         else:
             logger.debug("Propagation worker already running for zone %s", name)
 
-    def parse_zone_info(self, entry: Dict[str, Any]) -> ZoneConfig:
-        """Parse zone information from a journal message."""
-        # Expected example payload (but now parsed with regex):
-        # [STATS] example.com 2024072826 RR[count=4 time=0(sec)] ...
-        message = entry.get('MESSAGE', '')
-        match = self.zone_serial_regex.search(message)
-        if not match:
-            raise ValueError(f"Journal entry did not match stats regex: {message}")
-
-        zone = match.group('zone')
-        serial = match.group('serial')
-
-        if zone not in self.zones:
-            raise ValueError(f"Zone {zone} not found in zone configurations")
-
-        update_time = entry['__REALTIME_TIMESTAMP']
-
+    def get_zone_config(self, zone: str, serial: int, update_time: datetime) -> ZoneConfig:
+        """Apply a zone serial/update_time to the ZoneConfig identified by zone."""
         zone_config = self.zones[zone]
         zone_config.synced = False
-        zone_config.primary_nameserver.serial = int(serial)
+        zone_config.primary_nameserver.serial = serial
         zone_config.primary_nameserver.update_time = update_time
-
         return zone_config

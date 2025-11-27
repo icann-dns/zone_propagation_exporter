@@ -38,7 +38,7 @@ def test_get_args_defaults():
         args = get_args()
         assert args.verbose == 0
         assert args.config_file == Path('/etc/coralogix-exporter/zones.yaml')
-        assert args.stats_regex is None
+        assert args.zone_serial_regex is None
         assert args.zone is None
         assert args.nameservers == []
         assert args.port == 53
@@ -53,7 +53,7 @@ def test_get_args_with_options():
         'propagation-exporter',
         '-vvv',
         '-c', '/tmp/zones.yaml',
-        '--stats-regex', 'custom.*pattern',
+        '--zone-serial-regex', 'custom.*pattern',
         '--zone', 'example.com',
         '--ns', '8.8.8.8',
         '--ns', '1.1.1.1',
@@ -65,7 +65,7 @@ def test_get_args_with_options():
         args = get_args()
         assert args.verbose == 3
         assert args.config_file == Path('/tmp/zones.yaml')
-        assert args.stats_regex == 'custom.*pattern'
+        assert args.zone_serial_regex == 'custom.*pattern'
         assert args.zone == 'example.com'
         assert args.nameservers == ['8.8.8.8', '1.1.1.1']
         assert args.port == 5353
@@ -112,7 +112,7 @@ def test_main_soa_check_mode_adds_trailing_dot(mock_resolve: MagicMock):
 
 @patch('propagation_exporter.cli.threading.Thread')
 @patch('propagation_exporter.cli.JournalReader')
-@patch('propagation_exporter.cli.ZoneManager.load_from_file')
+@patch('propagation_exporter.cli.ZoneManager.load_from_config')
 @patch('propagation_exporter.cli.start_http_server')
 def test_main_journal_mode(mock_http: MagicMock, mock_load: MagicMock,
                            mock_journal: MagicMock, mock_thread: MagicMock, tmp_path: Path):
@@ -149,8 +149,11 @@ def test_main_journal_mode(mock_http: MagicMock, mock_load: MagicMock,
     # Verify zone manager loaded
     mock_load.assert_called_once()
 
-    # Verify journal reader created
-    mock_journal.assert_called_once_with(mock_zone_manager)
+    # Verify journal reader created (accept bare or with explicit None)
+    jr_args, jr_kwargs = mock_journal.call_args
+    assert jr_args[0] == mock_zone_manager
+    if 'zone_serial_regex' in jr_kwargs:
+        assert jr_kwargs['zone_serial_regex'] is None
 
     # Verify thread started
     mock_thread_instance.start.assert_called_once()
@@ -158,11 +161,11 @@ def test_main_journal_mode(mock_http: MagicMock, mock_load: MagicMock,
 
 @patch('propagation_exporter.cli.threading.Thread')
 @patch('propagation_exporter.cli.JournalReader')
-@patch('propagation_exporter.cli.ZoneManager.load_from_file')
+@patch('propagation_exporter.cli.ZoneManager.load_from_config')
 @patch('propagation_exporter.cli.start_http_server')
-def test_main_with_custom_stats_regex(mock_http: MagicMock, mock_load: MagicMock,
+def test_main_with_custom_zone_serial_regex(mock_http: MagicMock, mock_load: MagicMock,
                                       mock_journal: MagicMock, mock_thread: MagicMock, tmp_path: Path):
-    """Test main() passes custom stats regex to ZoneManager."""
+    """Test main() passes custom stats regex to JournalReader."""
     config_file = tmp_path / 'zones.yaml'
     config_file.write_text('zones:\n  example.com.:\n    primary_nameserver: 192.0.2.1\n    downstream_nameservers: []')
 
@@ -175,10 +178,11 @@ def test_main_with_custom_stats_regex(mock_http: MagicMock, mock_load: MagicMock
     with patch.object(sys, 'argv', [
         'propagation-exporter',
         '-c', str(config_file),
-        '--stats-regex', 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)',
+        '--zone-serial-regex', 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)',
     ]):
         main()
 
-    # Verify load_from_file was called with custom regex
-    call_args = mock_load.call_args
-    assert call_args[1]['zone_serial_regex'] == 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)'
+    # Verify JournalReader was called with custom regex
+    jr_call_args = mock_journal.call_args
+    assert jr_call_args[0][0] == mock_zone_manager
+    assert jr_call_args[1]['zone_serial_regex'] == 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)'

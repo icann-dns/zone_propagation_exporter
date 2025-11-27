@@ -4,6 +4,7 @@ import threading
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
+import yaml  # type: ignore[import-untyped]
 from prometheus_client import start_http_server  # type: ignore[import-untyped]
 
 from .dns_utils import DNSChecker
@@ -44,7 +45,7 @@ def get_args() -> Namespace:  # pragma: no cover
         help='Path to the zone configuration file'
     )
     parser.add_argument(
-        '--stats-regex', type=str, default=None,
+        '--zone-serial-regex', type=str, default=None,
         help=(
                 'Regex pattern to parse journal stats lines; must include named groups'
                 'zone, serial, rr_count'
@@ -105,10 +106,11 @@ def main() -> None:
     start_http_server(args.metrics_port)
 
     logging.info("Starting systemd journal reader in background thread...")
-    zone_manager = ZoneManager.load_from_file(
-        args.config_file, zone_serial_regex=args.stats_regex
-    )
-    journal_reader = JournalReader(zone_manager)
+    config = yaml.safe_load(args.config_file.read_text())
+    zone_manager = ZoneManager.load_from_config(config)
+    zone_serial_regex = args.zone_serial_regex if args.zone_serial_regex \
+        else config.get('zone_serial_regex')
+    journal_reader = JournalReader(zone_manager, zone_serial_regex=zone_serial_regex)
 
     journal_thread = threading.Thread(
         target=journal_reader.run,
@@ -116,8 +118,6 @@ def main() -> None:
         daemon=True,
     )
     journal_thread.start()
-
-    # Keep the main thread alive while background threads run
     try:
         journal_thread.join()
     except KeyboardInterrupt:

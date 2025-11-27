@@ -1,5 +1,7 @@
 import logging
+import re
 import select
+from typing import Optional, Pattern, Union
 
 from systemd.journal import APPEND, LOG_INFO, Reader  # type: ignore[import-untyped]
 
@@ -8,12 +10,26 @@ from .zone import ZoneManager
 logger = logging.getLogger(__name__)
 
 
-class JournalReader(object):
-    """Reads and processes systemd journal entries."""
+DEFAULT_ZONE_SERIAL_REGEX = re.compile(
+    r"^\[STATS\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)"
+)
 
-    def __init__(self, zone_manager: ZoneManager, pattern: str = "[STATS]") -> None:
+
+class JournalReader(object):
+    """Reads and processes systemd journal entries and parses zone/serial updates."""
+
+    def __init__(
+        self,
+        zone_manager: ZoneManager,
+        zone_serial_regex: Optional[Union[str, Pattern[str]]] = None,
+    ) -> None:
         self.zone_manager = zone_manager
-        self.pattern = pattern
+        if zone_serial_regex is None:
+            self.zone_serial_regex: Pattern[str] = DEFAULT_ZONE_SERIAL_REGEX
+        elif isinstance(zone_serial_regex, str):
+            self.zone_serial_regex = re.compile(zone_serial_regex)
+        else:
+            self.zone_serial_regex = zone_serial_regex
 
     def run(self) -> None:
         """Read and process journal entries for opendnssec-signer service."""
@@ -35,12 +51,12 @@ class JournalReader(object):
 
             for entry in journal:
                 message = entry.get('MESSAGE', '')
-                if message.startswith(self.pattern):
-                    logger.debug(f"Matched entry: {message}")
-                    try:
-                        zone_config = self.zone_manager.parse_zone_info(entry)
-                    except ValueError as error:
-                        logger.error(f"Error parsing zone info: {error}")
-                        continue
-                    logger.info(f"Extracted ZoneConfig: {zone_config}")
-                    self.zone_manager.start_propagation_check(zone_config)
+                match = self.zone_serial_regex.search(message)
+                if not match:
+                    continue
+                zone = match.group('zone')
+                serial = int(match.group('serial'))
+                update_time = entry['__REALTIME_TIMESTAMP']
+                zone_config = self.zone_manager.get_zone_config(zone, serial, update_time)
+                logger.info(f"Updated ZoneConfig: {zone_config}")
+                self.zone_manager.start_propagation_check(zone_config)

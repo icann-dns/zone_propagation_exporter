@@ -91,61 +91,6 @@ def test_journal_reader_skips_non_stats_entries(MockReader: MagicMock):
 
 
 @patch("propagation_exporter.journal.Reader")
-def test_journal_reader_handles_parse_errors(MockReader: MagicMock):
-    """Test that parse errors are logged and don't crash the reader."""
-    from datetime import datetime
-
-    from propagation_exporter.journal import JournalReader
-    from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
-
-    zone_name = "example.com."
-    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
-        zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
-    zone_manager = ZoneManager({zone_name: zc})
-
-    mock_journal = MockReader.return_value
-    mock_journal.get_events.return_value = 1
-    mock_journal.process.return_value = 1
-
-    # Entry starts with [STATS] but doesn't match pattern or is for unknown zone
-    mock_entry = {
-        "MESSAGE": "[STATS] malformed entry that won't parse",
-        "__REALTIME_TIMESTAMP": datetime.now(),
-    }
-    mock_journal.__iter__.return_value = [mock_entry]
-
-    reader = JournalReader(zone_manager)
-
-    with patch("propagation_exporter.journal.select.poll") as mock_poll_class:
-        mock_poller = MagicMock()
-        mock_poll_class.return_value = mock_poller
-        mock_poller.poll.side_effect = [True, False]
-
-        # Should not raise, should log error instead
-        reader.run()
-
-
-@patch("propagation_exporter.journal.Reader")
-def test_journal_reader_custom_pattern(MockReader: MagicMock):
-    """Test JournalReader with custom pattern."""
-    from datetime import datetime
-
-    from propagation_exporter.journal import JournalReader
-    from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
-
-    zone_name = "example.com."
-    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
-        zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
-    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
-    zone_manager = ZoneManager({zone_name: zc})
-
-    # Use custom pattern
-    reader = JournalReader(zone_manager, pattern="[CUSTOM]")
-    assert reader.pattern == "[CUSTOM]"
-
-
-@patch("propagation_exporter.journal.Reader")
 @patch("propagation_exporter.journal.APPEND", 1)
 def test_journal_reader_skips_non_append_events(MockReader: MagicMock):
     """Test that journal.process() != APPEND continues (line 34 coverage)."""

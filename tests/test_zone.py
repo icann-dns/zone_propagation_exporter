@@ -4,6 +4,8 @@ from textwrap import dedent
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
+import yaml
+
 from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
 
 
@@ -62,47 +64,38 @@ def make_zone_manager_single(zone_name: str = "example.com.") -> ZoneManager:
     return ZoneManager({zone_name: zc})
 
 
-def test_load_from_file_parses_config(tmp_path: Path):
-    yaml_text = dedent(
-        f"""
-        primary_nameserver: 192.0.2.10
-        zones:
-          example.com.:
-            downstream_nameservers:
-              - 192.0.2.11
-              - 192.0.2.12
-        """
-    )
-    cfg = tmp_path / "zones.yaml"
-    cfg.write_text(yaml_text)
+def test_load_from_config_parses_config(tmp_path: Path):
+    config = {
+        'primary_nameserver': '192.0.2.10',
+        'zones': {
+            'example.com.': {
+                'downstream_nameservers': ['192.0.2.11', '192.0.2.12']
+            }
+        }
+    }
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
-        zm = ZoneManager.load_from_file(cfg)
+        zm = ZoneManager.load_from_config(config)
     assert "example.com." in zm.zones
     zc = zm.zones["example.com."]
     assert zc.primary_nameserver.name_server == "192.0.2.10"
     assert [ns.name_server for ns in zc.downstream_nameservers] == ["192.0.2.11", "192.0.2.12"]
 
 
-def test_load_from_file_with_default_downstreams(tmp_path: Path):
-    yaml_text = dedent(
-        f"""
-        primary_nameserver: 192.0.2.10
-        default_downstream_nameservers:
-          - 192.0.2.20
-          - 192.0.2.21
-        zones:
-          example.com.:
-            downstream_nameservers:
-              - 192.0.2.11
-          example.org.:
-            downstream_nameservers:
-              - 192.0.2.12
-        """
-    )
-    cfg = tmp_path / "zones.yaml"
-    cfg.write_text(yaml_text)
+def test_load_from_config_with_default_downstreams(tmp_path: Path):
+    config = {
+        'primary_nameserver': '192.0.2.10',
+        'default_downstream_nameservers': ['192.0.2.20', '192.0.2.21'],
+        'zones': {
+            'example.com.': {
+                'downstream_nameservers': ['192.0.2.11']
+            },
+            'example.org.': {
+                'downstream_nameservers': ['192.0.2.12']
+            }
+        }
+    }
     with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
-        zm = ZoneManager.load_from_file(cfg)
+        zm = ZoneManager.load_from_config(config)
 
     # Check example.com has both specific and default downstreams
     assert "example.com." in zm.zones
@@ -116,14 +109,12 @@ def test_load_from_file_with_default_downstreams(tmp_path: Path):
 
 
 
-def test_parse_zone_info_updates_zone_and_metrics():
+def test_get_zone_config_updates_zone():
     zm = make_zone_manager_single()
-    entry = {
-        "MESSAGE": "[STATS] example.com. 2025010101 RR[count=5 time=0(sec)] other text",
-        "__REALTIME_TIMESTAMP": datetime.now(),
-    }
-    zc = zm.parse_zone_info(entry)
+    update_time = datetime.now()
+    zc = zm.get_zone_config("example.com.", 2025010101, update_time)
     assert zc.primary_nameserver.serial == 2025010101
+    assert zc.primary_nameserver.update_time == update_time
     assert zc.synced is False
 
 
@@ -285,49 +276,27 @@ def test_check_downstream_propagation_handles_higher_serial(mock_sleep: MagicMoc
     assert all(ns.serial == 101 for ns in zc.downstream_nameservers)
 
 
-def test_zone_manager_custom_regex_string():
-    """Test ZoneManager with custom regex as string."""
+def test_journal_reader_accepts_custom_regex_string():
+    """Test JournalReader with custom regex as string."""
+    from propagation_exporter.journal import JournalReader
     custom_regex = r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)"
     zm = make_zone_manager_single()
-    zm2 = ZoneManager(zm.zones, zone_serial_regex=custom_regex)
-    assert zm2.zone_serial_regex.pattern == custom_regex
+    jr = JournalReader(zm, zone_serial_regex=custom_regex)
+    assert jr.zone_serial_regex.pattern == custom_regex
 
 
-def test_zone_manager_custom_regex_compiled():
-    """Test ZoneManager with pre-compiled regex Pattern."""
+def test_journal_reader_accepts_custom_regex_compiled():
+    """Test JournalReader with pre-compiled regex Pattern."""
     import re
+
+    from propagation_exporter.journal import JournalReader
     custom_pattern = re.compile(r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)")
     zm = make_zone_manager_single()
-    zm2 = ZoneManager(zm.zones, zone_serial_regex=custom_pattern)
-    assert zm2.zone_serial_regex == custom_pattern
+    jr = JournalReader(zm, zone_serial_regex=custom_pattern)
+    assert jr.zone_serial_regex == custom_pattern
 
 
-def test_parse_zone_info_unknown_zone_raises():
-    """Test that parsing an entry for an unknown zone raises ValueError."""
-    zm = make_zone_manager_single("example.com.")
-    entry = {
-        "MESSAGE": "[STATS] unknown.zone. 2025010101 RR[count=5 time=0(sec)]",
-        "__REALTIME_TIMESTAMP": datetime.now(),
-    }
-    try:
-        zm.parse_zone_info(entry)
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "not found in zone configurations" in str(e)
-
-
-def test_parse_zone_info_no_match_raises():
-    """Test that parsing an entry that doesn't match regex raises ValueError."""
-    zm = make_zone_manager_single()
-    entry = {
-        "MESSAGE": "This does not match the pattern",
-        "__REALTIME_TIMESTAMP": datetime.now(),
-    }
-    try:
-        zm.parse_zone_info(entry)
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "did not match stats regex" in str(e)
+# Parsing responsibility moved to JournalReader; no-match behavior tested in journal tests.
 
 
 def test_start_propagation_check_thread_already_running():
