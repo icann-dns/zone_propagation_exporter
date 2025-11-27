@@ -106,7 +106,7 @@ def main() -> None:
 
     logging.info("Starting systemd journal reader in background thread...")
     zone_manager = ZoneManager.load_from_file(
-        args.config_file, zone_stats_regex=args.stats_regex
+        args.config_file, zone_serial_regex=args.stats_regex
     )
     journal_reader = JournalReader(zone_manager)
 

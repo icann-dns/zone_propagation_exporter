@@ -6,7 +6,7 @@ Provides journal parsing, DNS checks, metrics, and CLI entry point.
 from .dns_utils import DNSChecker
 from .zone import (
     ZoneManager,
-    DEFAULT_ZONE_STATS_REGEX,
+    DEFAULT_ZONE_SERIAL_REGEX,
     ZoneInfo,
     ZoneConfig
 )
@@ -15,7 +15,7 @@ from .zone import (
 __all__ = [
     "DNSChecker",
     "ZoneManager",
-    "DEFAULT_ZONE_STATS_REGEX",
+    "DEFAULT_ZONE_SERIAL_REGEX",
     "ZoneInfo",
     "ZoneConfig",
 ]

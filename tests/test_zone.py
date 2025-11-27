@@ -290,8 +290,8 @@ def test_zone_manager_custom_regex_string():
     """Test ZoneManager with custom regex as string."""
     custom_regex = r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)"
     zm = make_zone_manager_single()
-    zm2 = ZoneManager(zm.zones, zone_stats_regex=custom_regex)
-    assert zm2.zone_stats_regex.pattern == custom_regex
+    zm2 = ZoneManager(zm.zones, zone_serial_regex=custom_regex)
+    assert zm2.zone_serial_regex.pattern == custom_regex
 
 
 def test_zone_manager_custom_regex_compiled():
@@ -299,8 +299,8 @@ def test_zone_manager_custom_regex_compiled():
     import re
     custom_pattern = re.compile(r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)")
     zm = make_zone_manager_single()
-    zm2 = ZoneManager(zm.zones, zone_stats_regex=custom_pattern)
-    assert zm2.zone_stats_regex == custom_pattern
+    zm2 = ZoneManager(zm.zones, zone_serial_regex=custom_pattern)
+    assert zm2.zone_serial_regex == custom_pattern
 
 
 def test_parse_zone_info_unknown_zone_raises():

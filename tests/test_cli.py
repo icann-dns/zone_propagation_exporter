@@ -181,4 +181,4 @@ def test_main_with_custom_stats_regex(mock_http: MagicMock, mock_load: MagicMock
 
     # Verify load_from_file was called with custom regex
     call_args = mock_load.call_args
-    assert call_args[1]['zone_stats_regex'] == 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)'
+    assert call_args[1]['zone_serial_regex'] == 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)'
