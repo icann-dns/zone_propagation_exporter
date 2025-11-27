@@ -10,8 +10,6 @@ from .dns_utils import DNSChecker
 logger = logging.getLogger(__name__)
 
 
-
-
 class ZoneInfo(object):
     """Information about a DNS zone and its nameserver."""
 
