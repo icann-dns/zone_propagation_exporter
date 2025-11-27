@@ -4,7 +4,6 @@ from textwrap import dedent
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
-import propagation_exporter.metrics as metrics
 from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
 
 

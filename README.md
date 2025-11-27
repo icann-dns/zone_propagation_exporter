@@ -77,8 +77,7 @@ Module layout
 Prometheus metrics
 ------------------
 
-- zone_rr_count{zone}
-- zone_in_sync{zone}
+- zone_out_of_sync{zone}
 - zone_propagation_delay_seconds{zone, nameserver, serial}
 
 Config file

@@ -108,7 +108,7 @@ class ZoneConfig(object):
 
                     # Update propagation delay metric (still propagating)
                     propagation_delay = (current_time - primary_update_time).total_seconds()
-                    for metric in [metrics.zone_propagation_delay, metrics.zone_in_sync]:
+                    for metric in [metrics.zone_propagation_delay, metrics.zone_out_of_sync]:
                         metric.labels(
                             zone=zone,
                             nameserver=ns.dns_name,
@@ -156,7 +156,7 @@ class ZoneConfig(object):
 
                 # Clear the propagation delay metric since nameserver is now synced
                 # This ensures the metric only shows when zones are NOT in sync
-                metrics.zone_in_sync.labels(
+                metrics.zone_out_of_sync.labels(
                     zone=zone,
                     nameserver=ns.dns_name,
                     serial=str(primary_serial),
