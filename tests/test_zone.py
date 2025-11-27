@@ -146,13 +146,13 @@ def test_check_downstream_propagation_eventually_syncs(mock_sleep: MagicMock, mo
     def side_effect(zone: str, ns: str, **kwargs: Any):
         if ns == "192.0.2.2":
             return 100
-        # For 192.0.2.3, return None on first call, wrong serial on second, then 100
+        # For 192.0.2.3, return None on first call, lower serial on second, then 100
         count = call_state[ns]
         call_state[ns] += 1
         if count == 0:
             return None
         if count == 1:
-            return 99
+            return 99  # Lower than primary (100), still propagating
         return 100
 
     mock_resolve.side_effect = side_effect
@@ -183,7 +183,7 @@ def test_check_downstream_propagation_warns_on_long_delay(mock_sleep: MagicMock,
     def side_effect(zone: str, ns: str, **kwargs: Any):
         call_count[0] += 1
         if call_count[0] == 1:
-            # First iteration: wrong serial for ns2
+            # First iteration: lower serial for ns2 (still propagating)
             return 99 if ns == "192.0.2.2" else 200
         # Second iteration: correct serial for all
         return 200
@@ -222,9 +222,9 @@ def test_check_downstream_propagation_throttles_warnings(mock_sleep: MagicMock, 
 
     def side_effect(zone: str, ns: str, **kwargs: Any):
         resolve_call_count[0] += 1
-        # Return wrong serial for first 2 iterations, then correct serial
+        # Return lower serial for first 2 iterations (still propagating), then correct serial
         if resolve_call_count[0] <= 4:  # 2 iterations * 2 nameservers
-            return 99
+            return 99  # Lower than primary (200), still propagating
         return 200
 
     mock_resolve.side_effect = side_effect
@@ -254,6 +254,36 @@ def test_check_downstream_propagation_throttles_warnings(mock_sleep: MagicMock, 
 
             # Should have exactly 2 warnings (one at t=0, one at t=61)
             assert len(warning_calls) == 2, f"Expected 2 warnings due to throttling, got {len(warning_calls)}"
+
+
+@patch("propagation_exporter.zone.metrics.zone_propagation_delay")
+@patch("propagation_exporter.zone.DNSChecker.resolve_soa_serial")
+@patch("time.sleep", return_value=None)
+def test_check_downstream_propagation_handles_higher_serial(mock_sleep: MagicMock, mock_resolve: MagicMock, mock_delay_gauge: MagicMock):
+    """Test that downstream with higher serial than primary logs warning and is treated as synced."""
+    zone_name = "example.com."
+    zm = make_zone_manager_single(zone_name)
+    zc = zm.zones[zone_name]
+
+    # Set a primary serial
+    zc.primary_nameserver.serial = 100
+    zc.primary_nameserver.update_time = datetime.now() - timedelta(seconds=1)
+
+    # Downstream returns higher serial than primary
+    mock_resolve.return_value = 101
+
+    # Patch logger to verify warning is called
+    with patch("propagation_exporter.zone.logger") as mock_logger:
+        zc.check_downstream_propagation()
+
+        # Verify warning was logged for higher serial
+        warning_calls = [call for call in mock_logger.warning.call_args_list
+                        if "higher serial than primary" in str(call)]
+        assert len(warning_calls) == 2, f"Expected warning for both nameservers with higher serial, got {len(warning_calls)}"
+
+    # Should be treated as synced despite higher serial
+    assert zc.synced is True
+    assert all(ns.serial == 101 for ns in zc.downstream_nameservers)
 
 
 def test_zone_manager_custom_regex_string():

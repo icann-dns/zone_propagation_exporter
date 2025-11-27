@@ -102,7 +102,7 @@ class ZoneConfig(object):
                     "Zone %s: %s serial=%s (primary=%s)",
                     zone, ns.name_server, downstream_serial, primary_serial
                 )
-                if downstream_serial != primary_serial:
+                if downstream_serial < primary_serial:
                     ns.serial = downstream_serial
                     ns.update_time = datetime.now()
 
@@ -130,6 +130,15 @@ class ZoneConfig(object):
                             self._last_warning_time[ns.name_server] = current_time
                     continue
 
+                if downstream_serial > primary_serial:
+                    logger.warning(
+                        "Downstream %s has higher serial than primary for %s:"
+                        " downstream=%s > primary=%s (assuming synced)",
+                        ns.name_server,
+                        zone,
+                        downstream_serial,
+                        primary_serial,
+                    )
                 # Nameserver is now synced - record the delay at this moment
                 # Only log if we haven't already logged sync for this serial
                 if self._synced_logged.get(ns.name_server) != downstream_serial:
@@ -166,7 +175,8 @@ class ZoneConfig(object):
                 )
 
             # Check if all nameservers have synced by comparing serials
-            self.synced = all(ns.serial == primary_serial for ns in self.downstream_nameservers)
+            # A nameserver is considered synced if its serial >= primary serial
+            self.synced = all(ns.serial >= primary_serial for ns in self.downstream_nameservers)
             logger.debug("Zone %s synced flag set to %s", zone, self.synced)
 
             if self.synced:
