@@ -169,6 +169,14 @@ class ZoneConfig(object):
             logger.debug("Zone %s synced flag set to %s", zone, self.synced)
 
             if self.synced:
+                # make sure we 0 out all out_of_sync metrics
+                # Not sure why this is needed but it is
+                for ns in self.downstream_nameservers:
+                    metrics.zone_out_of_sync.labels(
+                        zone=zone,
+                        nameserver=ns.dns_name,
+                        serial=str(primary_serial),
+                    ).set(0)
                 logger.info("Zone %s fully propagated to all downstream nameservers", zone)
                 break
             sleep(0.5)
