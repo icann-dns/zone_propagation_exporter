@@ -60,9 +60,125 @@ class ZoneConfig(object):
     def __str__(self) -> str:
         return f"ZoneConfig({self.name}, {self.primary_nameserver.serial})"
 
+    def _update_metrics_for_propagating_ns(
+        self, ns: ZoneInfo, propagation_delay: float, primary_serial: int
+    ) -> None:
+        """Update metrics for a nameserver that is still propagating."""
+        for metric in [metrics.zone_propagation_delay, metrics.zone_out_of_sync]:
+            metric.labels(
+                zone=self.name,
+                nameserver=ns.dns_name,
+                serial=str(primary_serial),
+            ).set(propagation_delay)
+
+    def _should_warn_about_delay(
+        self, ns: ZoneInfo, current_time: datetime, propagation_delay: float
+    ) -> bool:
+        """Check if we should warn about propagation delay (throttled to once per 60s)."""
+        if propagation_delay <= 300:  # Only warn after 5 minutes
+            return False
+
+        last_warning = self._last_warning_time.get(ns.name_server)
+        if last_warning is None or (current_time - last_warning).total_seconds() >= 60:
+            self._last_warning_time[ns.name_server] = current_time
+            return True
+        return False
+
+    def _handle_synced_nameserver(
+        self, ns: ZoneInfo, downstream_serial: int, primary_serial: int, primary_update_time: datetime
+    ) -> None:
+        """Handle a nameserver that has synced with the primary."""
+        # Only log if we haven't already logged sync for this serial
+        if self._synced_logged.get(ns.name_server) != downstream_serial:
+            logger.debug(
+                "Downstream %s is synced for %s: downstream=%s == primary=%s",
+                ns.name_server,
+                self.name,
+                downstream_serial,
+                primary_serial,
+            )
+            self._synced_logged[ns.name_server] = downstream_serial
+
+        ns.serial = downstream_serial
+        ns.update_time = datetime.now()
+
+        # Clear out_of_sync metric
+        metrics.zone_out_of_sync.labels(
+            zone=self.name,
+            nameserver=ns.dns_name,
+            serial=str(primary_serial),
+        ).set(0)
+
+        # Record final propagation delay
+        propagation_delay = (ns.update_time - primary_update_time).total_seconds()
+        metrics.zone_propagation_delay.labels(
+            zone=self.name,
+            nameserver=ns.dns_name,
+            serial=str(primary_serial),
+        ).set(propagation_delay)
+        logger.debug(
+            "Zone %s: %s propagation delay: %.2f seconds",
+            self.name, ns.dns_name, propagation_delay
+        )
+
+    def _check_nameserver_serial(
+        self, ns: ZoneInfo, primary_serial: int, primary_update_time: datetime, current_time: datetime
+    ) -> bool:
+        """Check a single nameserver's serial and update state. Returns True if still propagating."""
+        # Skip if this nameserver has already synced
+        if ns.serial == primary_serial:
+            return False
+
+        logger.debug(
+            "Checking propagation for zone %s on nameserver %s",
+            self.name, ns.name_server
+        )
+        downstream_serial = DNSChecker.resolve_soa_serial(self.name, ns.name_server)
+
+        if downstream_serial is None:
+            logger.warning(
+                "No serial obtained from %s for %s", ns.name_server, self.name
+            )
+            return True  # Still propagating (no answer)
+
+        logger.debug(
+            "Zone %s: %s serial=%s (primary=%s)",
+            self.name, ns.name_server, downstream_serial, primary_serial
+        )
+
+        if downstream_serial < primary_serial:
+            ns.serial = downstream_serial
+            ns.update_time = datetime.now()
+
+            propagation_delay = (current_time - primary_update_time).total_seconds()
+            self._update_metrics_for_propagating_ns(ns, propagation_delay, primary_serial)
+
+            if self._should_warn_about_delay(ns, current_time, propagation_delay):
+                logger.warning(
+                    "Downstream %s does not match %s: downstream=%s != primary=%s",
+                    ns.name_server,
+                    self.name,
+                    downstream_serial,
+                    primary_serial,
+                )
+            return True  # Still propagating
+
+        if downstream_serial > primary_serial:
+            logger.warning(
+                "Downstream %s has higher serial than primary for %s:"
+                " downstream=%s > primary=%s (assuming synced)",
+                ns.name_server,
+                self.name,
+                downstream_serial,
+                primary_serial,
+            )
+
+        # Nameserver is synced (downstream >= primary)
+        self._handle_synced_nameserver(ns, downstream_serial, primary_serial, primary_update_time)
+        return False  # Not propagating
+
     def check_downstream_propagation(self) -> None:
         """Check if the zone is properly propagated to all downstream nameservers."""
-        zone = self.name
         primary_serial = self.primary_nameserver.serial
         primary_update_time = self.primary_nameserver.update_time
         self.synced = False
@@ -71,113 +187,21 @@ class ZoneConfig(object):
             current_time = datetime.now()
 
             for ns in self.downstream_nameservers:
-                # Skip if this nameserver has already synced (its serial matches primary)
-                if ns.serial == primary_serial:
-                    continue
+                self._check_nameserver_serial(ns, primary_serial, primary_update_time, current_time)
 
-                logger.debug(
-                    "Checking propagation for zone %s on nameserver %s",
-                    zone, ns.name_server
-                )
-                downstream_serial = DNSChecker.resolve_soa_serial(zone, ns.name_server)
-
-                if downstream_serial is None:
-                    logger.warning(
-                        "No serial obtained from %s for %s", ns.name_server, zone
-                    )
-                    continue
-
-                logger.debug(
-                    "Zone %s: %s serial=%s (primary=%s)",
-                    zone, ns.name_server, downstream_serial, primary_serial
-                )
-                if downstream_serial < primary_serial:
-                    ns.serial = downstream_serial
-                    ns.update_time = datetime.now()
-
-                    # Update propagation delay metric (still propagating)
-                    propagation_delay = (current_time - primary_update_time).total_seconds()
-                    for metric in [metrics.zone_propagation_delay, metrics.zone_out_of_sync]:
-                        metric.labels(
-                            zone=zone,
-                            nameserver=ns.dns_name,
-                            serial=str(primary_serial),
-                        ).set(propagation_delay)
-                    if propagation_delay > 300:
-                        # Only emit warning if at least 5 minutes have passed since last warning
-                        last_warning = self._last_warning_time.get(ns.name_server)
-                        if last_warning is None or (
-                            current_time - last_warning
-                        ).total_seconds() >= 60:
-                            logger.warning(
-                                "Downstream %s does not match %s: downstream=%s != primary=%s",
-                                ns.name_server,
-                                zone,
-                                downstream_serial,
-                                primary_serial,
-                            )
-                            self._last_warning_time[ns.name_server] = current_time
-                    continue
-
-                if downstream_serial > primary_serial:
-                    logger.warning(
-                        "Downstream %s has higher serial than primary for %s:"
-                        " downstream=%s > primary=%s (assuming synced)",
-                        ns.name_server,
-                        zone,
-                        downstream_serial,
-                        primary_serial,
-                    )
-                # Nameserver is now synced - record the delay at this moment
-                # Only log if we haven't already logged sync for this serial
-                if self._synced_logged.get(ns.name_server) != downstream_serial:
-                    logger.debug(
-                        "Downstream %s is synced for %s: downstream=%s == primary=%s",
-                        ns.name_server,
-                        zone,
-                        downstream_serial,
-                        primary_serial,
-                    )
-                    self._synced_logged[ns.name_server] = downstream_serial
-
-                ns.serial = downstream_serial
-                ns.update_time = datetime.now()
-
-                # Clear the propagation delay metric since nameserver is now synced
-                # This ensures the metric only shows when zones are NOT in sync
-                metrics.zone_out_of_sync.labels(
-                    zone=zone,
-                    nameserver=ns.dns_name,
-                    serial=str(primary_serial),
-                ).set(0)
-
-                # Calculate the final propagation delay for logging
-                propagation_delay = (ns.update_time - primary_update_time).total_seconds()
-                metrics.zone_propagation_delay.labels(
-                    zone=zone,
-                    nameserver=ns.dns_name,
-                    serial=str(primary_serial),
-                ).set(propagation_delay)
-                logger.debug(
-                    "Zone %s: %s propagation delay: %.2f seconds",
-                    zone, ns.dns_name, propagation_delay
-                )
-
-            # Check if all nameservers have synced by comparing serials
-            # A nameserver is considered synced if its serial >= primary serial
+            # Check if all nameservers have synced
             self.synced = all(ns.serial >= primary_serial for ns in self.downstream_nameservers)
-            logger.debug("Zone %s synced flag set to %s", zone, self.synced)
+            logger.debug("Zone %s synced flag set to %s", self.name, self.synced)
 
             if self.synced:
-                # make sure we 0 out all out_of_sync metrics
-                # Not sure why this is needed but it is
+                # Ensure all out_of_sync metrics are zeroed
                 for ns in self.downstream_nameservers:
                     metrics.zone_out_of_sync.labels(
-                        zone=zone,
+                        zone=self.name,
                         nameserver=ns.dns_name,
                         serial=str(primary_serial),
                     ).set(0)
-                logger.info("Zone %s fully propagated to all downstream nameservers", zone)
+                logger.info("Zone %s fully propagated to all downstream nameservers", self.name)
                 break
             sleep(0.5)
 
