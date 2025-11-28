@@ -85,7 +85,11 @@ class ZoneConfig(object):
         return False
 
     def _handle_synced_nameserver(
-        self, ns: ZoneInfo, downstream_serial: int, primary_serial: int, primary_update_time: datetime
+        self,
+        ns: ZoneInfo,
+        downstream_serial: int,
+        primary_serial: int,
+        primary_update_time: datetime
     ) -> None:
         """Handle a nameserver that has synced with the primary."""
         # Only log if we haven't already logged sync for this serial
@@ -122,9 +126,14 @@ class ZoneConfig(object):
         )
 
     def _check_nameserver_serial(
-        self, ns: ZoneInfo, primary_serial: int, primary_update_time: datetime, current_time: datetime
+        self,
+        ns: ZoneInfo,
+        primary_serial: int,
+        primary_update_time: datetime,
+        current_time: datetime
     ) -> bool:
-        """Check a single nameserver's serial and update state. Returns True if still propagating."""
+        """Check a single nameserver's serial and update state.
+        Returns True if still propagating."""
         # Skip if this nameserver has already synced
         if ns.serial == primary_serial:
             return False
