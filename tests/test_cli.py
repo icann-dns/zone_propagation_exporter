@@ -110,6 +110,33 @@ def test_main_soa_check_mode_adds_trailing_dot(mock_resolve: MagicMock):
     assert mock_resolve.call_args[0][0] == 'example.com.'
 
 
+@patch('propagation_exporter.cli.ZoneManager.load_from_config')
+def test_main_raises_error_when_systemd_unit_missing(mock_load: MagicMock, tmp_path: Path):
+    """Test that main() raises ValueError when systemd_unit is not specified."""
+    config_file = tmp_path / 'zones.yaml'
+    config_file.write_text(dedent("""
+        zones:
+          example.com.:
+            primary_nameserver: 192.0.2.1
+            downstream_nameservers:
+              - 192.0.2.2
+    """))
+
+    mock_zone_manager = MagicMock()
+    mock_load.return_value = mock_zone_manager
+
+    with patch.object(sys, 'argv', [
+        'propagation-exporter',
+        '-c', str(config_file),
+    ]):
+        with patch('propagation_exporter.cli.start_http_server'):
+            try:
+                main()
+                assert False, "Expected ValueError to be raised"
+            except ValueError as e:
+                assert "systemd_unit must be specified" in str(e)
+
+
 @patch('propagation_exporter.cli.threading.Thread')
 @patch('propagation_exporter.cli.JournalReader')
 @patch('propagation_exporter.cli.ZoneManager.load_from_config')
@@ -120,6 +147,7 @@ def test_main_journal_mode(mock_http: MagicMock, mock_load: MagicMock,
     # Create a temporary config file
     config_file = tmp_path / 'zones.yaml'
     config_file.write_text(dedent("""
+        systemd_unit: opendnssec-signer.service
         zones:
           example.com.:
             primary_nameserver: 192.0.2.1
@@ -149,11 +177,10 @@ def test_main_journal_mode(mock_http: MagicMock, mock_load: MagicMock,
     # Verify zone manager loaded
     mock_load.assert_called_once()
 
-    # Verify journal reader created (accept bare or with explicit None)
+    # Verify journal reader created with systemd_unit
     jr_args, jr_kwargs = mock_journal.call_args
     assert jr_args[0] == mock_zone_manager
-    if 'zone_serial_regex' in jr_kwargs:
-        assert jr_kwargs['zone_serial_regex'] is None
+    assert jr_kwargs['systemd_unit'] == 'opendnssec-signer.service'
 
     # Verify thread started
     mock_thread_instance.start.assert_called_once()
@@ -167,7 +194,7 @@ def test_main_with_custom_zone_serial_regex(mock_http: MagicMock, mock_load: Mag
                                       mock_journal: MagicMock, mock_thread: MagicMock, tmp_path: Path):
     """Test main() passes custom stats regex to JournalReader."""
     config_file = tmp_path / 'zones.yaml'
-    config_file.write_text('zones:\n  example.com.:\n    primary_nameserver: 192.0.2.1\n    downstream_nameservers: []')
+    config_file.write_text('systemd_unit: opendnssec-signer.service\nzones:\n  example.com.:\n    primary_nameserver: 192.0.2.1\n    downstream_nameservers: []')
 
     mock_zone_manager = MagicMock()
     mock_load.return_value = mock_zone_manager
@@ -186,3 +213,65 @@ def test_main_with_custom_zone_serial_regex(mock_http: MagicMock, mock_load: Mag
     jr_call_args = mock_journal.call_args
     assert jr_call_args[0][0] == mock_zone_manager
     assert jr_call_args[1]['zone_serial_regex'] == 'custom.*(?P<zone>\\S+).*(?P<serial>\\d+).*(?P<rr_count>\\d+)'
+
+
+@patch('propagation_exporter.cli.threading.Thread')
+@patch('propagation_exporter.cli.JournalReader')
+@patch('propagation_exporter.cli.ZoneManager.load_from_config')
+@patch('propagation_exporter.cli.start_http_server')
+def test_main_with_cli_systemd_unit(mock_http: MagicMock, mock_load: MagicMock,
+                                     mock_journal: MagicMock, mock_thread: MagicMock, tmp_path: Path):
+    """Test main() uses --systemd-unit from CLI over config file."""
+    config_file = tmp_path / 'zones.yaml'
+    config_file.write_text('systemd_unit: config-unit.service\nzones:\n  example.com.:\n    primary_nameserver: 192.0.2.1\n    downstream_nameservers: []')
+
+    mock_zone_manager = MagicMock()
+    mock_load.return_value = mock_zone_manager
+    mock_thread_instance = MagicMock()
+    mock_thread.return_value = mock_thread_instance
+    mock_thread_instance.join.side_effect = KeyboardInterrupt()
+
+    with patch.object(sys, 'argv', [
+        'propagation-exporter',
+        '-c', str(config_file),
+        '--systemd-unit', 'cli-unit.service',
+    ]):
+        main()
+
+    # Verify JournalReader was called with CLI systemd_unit
+    jr_call_args = mock_journal.call_args
+    assert jr_call_args[1]['systemd_unit'] == 'cli-unit.service'
+
+
+@patch('propagation_exporter.cli.threading.Thread')
+@patch('propagation_exporter.cli.JournalReader')
+@patch('propagation_exporter.cli.ZoneManager.load_from_config')
+@patch('propagation_exporter.cli.start_http_server')
+def test_main_with_config_zone_serial_regex(mock_http: MagicMock, mock_load: MagicMock,
+                                             mock_journal: MagicMock, mock_thread: MagicMock, tmp_path: Path):
+    """Test main() uses zone_serial_regex from config when CLI arg not provided."""
+    config_file = tmp_path / 'zones.yaml'
+    config_file.write_text(dedent("""
+        systemd_unit: opendnssec-signer.service
+        zone_serial_regex: 'config.*(?P<zone>\\S+).*(?P<serial>\\d+)'
+        zones:
+          example.com.:
+            primary_nameserver: 192.0.2.1
+            downstream_nameservers: []
+    """))
+
+    mock_zone_manager = MagicMock()
+    mock_load.return_value = mock_zone_manager
+    mock_thread_instance = MagicMock()
+    mock_thread.return_value = mock_thread_instance
+    mock_thread_instance.join.side_effect = KeyboardInterrupt()
+
+    with patch.object(sys, 'argv', [
+        'propagation-exporter',
+        '-c', str(config_file),
+    ]):
+        main()
+
+    # Verify JournalReader was called with config's zone_serial_regex
+    jr_call_args = mock_journal.call_args
+    assert jr_call_args[1]['zone_serial_regex'] == 'config.*(?P<zone>\\S+).*(?P<serial>\\d+)'

@@ -43,6 +43,7 @@ def get_args() -> Namespace:  # pragma: no cover
     parser.add_argument(
         '-V', '--version', action='version', version=f"%(prog)s {__version__}"
     )
+    parser.add_argument('-s', '--systemd-unit', type=str, help='systemd service to monitor')
     parser.add_argument(
         '-c', '--config-file', type=Path,
         default=Path('/etc/coralogix-exporter/zones.yaml'),
@@ -115,7 +116,10 @@ def main() -> None:
     zone_manager = ZoneManager.load_from_config(config)
     zone_serial_regex = args.zone_serial_regex if args.zone_serial_regex \
         else config.get('zone_serial_regex')
-    journal_reader = JournalReader(zone_manager, zone_serial_regex=zone_serial_regex)
+    systemd_unit = args.systemd_unit if args.systemd_unit else config.get('systemd_unit')
+    if systemd_unit is None:
+        raise ValueError("systemd_unit must be specified")
+    journal_reader = JournalReader(zone_manager, systemd_unit=systemd_unit, zone_serial_regex=zone_serial_regex)
 
     journal_thread = threading.Thread(
         target=journal_reader.run,

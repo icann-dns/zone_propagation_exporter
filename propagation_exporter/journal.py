@@ -21,29 +21,32 @@ class JournalReader(object):
     def __init__(
         self,
         zone_manager: ZoneManager,
+        systemd_unit: str,
         zone_serial_regex: Optional[Union[str, Pattern[str]]] = None,
     ) -> None:
         self.zone_manager = zone_manager
+        self.systemd_unit = systemd_unit
         if zone_serial_regex is None:
             self.zone_serial_regex: Pattern[str] = DEFAULT_ZONE_SERIAL_REGEX
         elif isinstance(zone_serial_regex, str):
             self.zone_serial_regex = re.compile(zone_serial_regex)
         else:
             self.zone_serial_regex = zone_serial_regex
+        logger.debug("regex pattern: %s", self.zone_serial_regex.pattern)
 
     def run(self) -> None:
         """Read and process journal entries for opendnssec-signer service."""
         journal = Reader()
         journal.log_level(LOG_INFO)
 
-        journal.add_match(_SYSTEMD_UNIT="opendnssec-signer.service")
+        journal.add_match(_SYSTEMD_UNIT=self.systemd_unit)
         journal.seek_tail()
         journal.get_previous()
 
         poller = select.poll()
         poller.register(journal, journal.get_events())
 
-        logger.info("Journal reader started, monitoring opendnssec-signer.service")
+        logger.info(f"Journal reader started, monitoring {self.systemd_unit}")
 
         while poller.poll():
             if journal.process() != APPEND:

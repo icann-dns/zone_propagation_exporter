@@ -37,7 +37,7 @@ def test_journal_reader_processes_stats_entries(MockReader: MagicMock):
     }
     mock_journal.__iter__.return_value = [mock_entry]
 
-    reader = JournalReader(zone_manager)
+    reader = JournalReader(zone_manager, systemd_unit="opendnssec-signer.service")
 
     # Mock the poller to return once then stop
     with patch("propagation_exporter.journal.select.poll") as mock_poll_class:
@@ -77,7 +77,7 @@ def test_journal_reader_skips_non_stats_entries(MockReader: MagicMock):
     }
     mock_journal.__iter__.return_value = [mock_entry]
 
-    reader = JournalReader(zone_manager)
+    reader = JournalReader(zone_manager, systemd_unit="opendnssec-signer.service")
 
     with patch("propagation_exporter.journal.select.poll") as mock_poll_class:
         mock_poller = MagicMock()
@@ -128,7 +128,7 @@ def test_journal_reader_skips_non_append_events(MockReader: MagicMock):
     }
     mock_journal.__iter__.return_value = iter([mock_entry])
 
-    reader = JournalReader(zone_manager)
+    reader = JournalReader(zone_manager, systemd_unit="opendnssec-signer.service")
 
     with patch("propagation_exporter.journal.select.poll") as mock_poll_class:
         mock_poller = MagicMock()
@@ -140,3 +140,98 @@ def test_journal_reader_skips_non_append_events(MockReader: MagicMock):
             reader.run()
             # Should be called once (only on the second iteration when process returns APPEND)
             mock_start.assert_called_once()
+
+
+@patch("propagation_exporter.journal.Reader")
+def test_journal_reader_initialization_with_custom_regex_string(MockReader: MagicMock):
+    """Test JournalReader initialization with custom regex as string."""
+    from datetime import datetime
+
+    from propagation_exporter.journal import JournalReader
+    from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
+
+    zone_name = "example.com."
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zone_manager = ZoneManager({zone_name: zc})
+
+    custom_regex = r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)"
+    reader = JournalReader(zone_manager, systemd_unit="test.service", zone_serial_regex=custom_regex)
+
+    assert reader.zone_serial_regex.pattern == custom_regex
+
+
+@patch("propagation_exporter.journal.Reader")
+def test_journal_reader_initialization_with_compiled_regex(MockReader: MagicMock):
+    """Test JournalReader initialization with pre-compiled regex Pattern."""
+    import re
+    from datetime import datetime
+
+    from propagation_exporter.journal import JournalReader
+    from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
+
+    zone_name = "example.com."
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zone_manager = ZoneManager({zone_name: zc})
+
+    custom_pattern = re.compile(r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)")
+    reader = JournalReader(zone_manager, systemd_unit="test.service", zone_serial_regex=custom_pattern)
+
+    assert reader.zone_serial_regex == custom_pattern
+
+
+@patch("propagation_exporter.journal.Reader")
+def test_journal_reader_uses_default_regex_when_none(MockReader: MagicMock):
+    """Test JournalReader uses DEFAULT_ZONE_SERIAL_REGEX when zone_serial_regex is None."""
+    from datetime import datetime
+
+    from propagation_exporter.journal import DEFAULT_ZONE_SERIAL_REGEX, JournalReader
+    from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
+
+    zone_name = "example.com."
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zone_manager = ZoneManager({zone_name: zc})
+
+    reader = JournalReader(zone_manager, systemd_unit="test.service", zone_serial_regex=None)
+
+    assert reader.zone_serial_regex == DEFAULT_ZONE_SERIAL_REGEX
+
+
+@patch("propagation_exporter.journal.Reader")
+def test_journal_reader_logs_on_startup(MockReader: MagicMock):
+    """Test that journal reader logs systemd_unit on startup."""
+    from datetime import datetime
+
+    from propagation_exporter.journal import JournalReader
+    from propagation_exporter.zone import ZoneConfig, ZoneInfo, ZoneManager
+
+    zone_name = "example.com."
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        zi_primary = ZoneInfo(name=zone_name, serial=0, update_time=datetime.min, dns_name="192.0.2.1")
+    zc = ZoneConfig(name=zone_name, primary_nameserver=zi_primary, downstream_nameservers=[])
+    zone_manager = ZoneManager({zone_name: zc})
+
+    mock_journal = MockReader.return_value
+    mock_journal.get_events.return_value = 1
+    mock_journal.process.return_value = 1
+    mock_journal.__iter__.return_value = []
+
+    reader = JournalReader(zone_manager, systemd_unit="my-test.service")
+
+    with patch("propagation_exporter.journal.select.poll") as mock_poll_class:
+        mock_poller = MagicMock()
+        mock_poll_class.return_value = mock_poller
+        mock_poller.poll.side_effect = [True, False]
+
+        with patch("propagation_exporter.journal.logger") as mock_logger:
+            reader.run()
+            # Verify startup log message includes systemd_unit
+            info_calls = [call for call in mock_logger.info.call_args_list
+                         if "Journal reader started" in str(call)]
+            assert len(info_calls) == 1
+            assert "my-test.service" in str(info_calls[0])

@@ -278,7 +278,7 @@ def test_journal_reader_accepts_custom_regex_string():
     from propagation_exporter.journal import JournalReader
     custom_regex = r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)"
     zm = make_zone_manager_single()
-    jr = JournalReader(zm, zone_serial_regex=custom_regex)
+    jr = JournalReader(zm, zone_serial_regex=custom_regex, systemd_unit="custom.service")
     assert jr.zone_serial_regex.pattern == custom_regex
 
 
@@ -289,7 +289,7 @@ def test_journal_reader_accepts_custom_regex_compiled():
     from propagation_exporter.journal import JournalReader
     custom_pattern = re.compile(r"^\[CUSTOM\]\s+(?P<zone>\S+)\s+(?P<serial>\d+)\s+RR\[count=(?P<rr_count>\d+)")
     zm = make_zone_manager_single()
-    jr = JournalReader(zm, zone_serial_regex=custom_pattern)
+    jr = JournalReader(zm, zone_serial_regex=custom_pattern, systemd_unit="custom.service")
     assert jr.zone_serial_regex == custom_pattern
 
 
