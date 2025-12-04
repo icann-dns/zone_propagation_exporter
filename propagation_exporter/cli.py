@@ -119,7 +119,11 @@ def main() -> None:
     systemd_unit = args.systemd_unit if args.systemd_unit else config.get('systemd_unit')
     if systemd_unit is None:
         raise ValueError("systemd_unit must be specified")
-    journal_reader = JournalReader(zone_manager, systemd_unit=systemd_unit, zone_serial_regex=zone_serial_regex)
+    journal_reader = JournalReader(
+        zone_manager,
+        systemd_unit=systemd_unit,
+        zone_serial_regex=zone_serial_regex
+    )
 
     journal_thread = threading.Thread(
         target=journal_reader.run,
