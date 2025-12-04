@@ -37,7 +37,7 @@ def test_get_args_defaults():
     with patch.object(sys, 'argv', ['propagation-exporter']):
         args = get_args()
         assert args.verbose == 0
-        assert args.config_file == Path('/etc/coralogix-exporter/zones.yaml')
+        assert args.config_file == Path('/etc/propagation-exporter/config.yml')
         assert args.zone_serial_regex is None
         assert args.zone is None
         assert args.nameservers == []
