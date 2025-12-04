@@ -46,7 +46,7 @@ def get_args() -> Namespace:  # pragma: no cover
     parser.add_argument('-s', '--systemd-unit', type=str, help='systemd service to monitor')
     parser.add_argument(
         '-c', '--config-file', type=Path,
-        default=Path('/etc/coralogix-exporter/zones.yaml'),
+        default=Path('/etc/propagation-exporter/config.yml'),
         help='Path to the zone configuration file'
     )
     parser.add_argument(
