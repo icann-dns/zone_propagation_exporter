@@ -146,7 +146,7 @@ class ZoneConfig(object):
         metrics.zone_propagation_serial.labels(
             nameserver=ns.name_server,
             zone=self.name,
-        ).set(downstream_serial if downstream_serial is not None else 0)
+        ).set(int(downstream_serial) if downstream_serial is not None else 0)
 
         if downstream_serial is None:
             logger.warning(
