@@ -64,11 +64,13 @@ class ZoneConfig(object):
         self, ns: ZoneInfo, propagation_delay: float, primary_serial: int
     ) -> None:
         """Update metrics for a nameserver that is still propagating."""
-        for metric in [metrics.zone_propagation_delay, metrics.zone_out_of_sync]:
+        for metric in [
+            metrics.zone_propagation_delay,
+            metrics.zone_propagation_out_of_sync_seconds
+        ]:
             metric.labels(
                 zone=self.name,
                 nameserver=ns.dns_name,
-                serial=str(primary_serial),
             ).set(propagation_delay)
 
     def _should_warn_about_delay(
@@ -107,10 +109,9 @@ class ZoneConfig(object):
         ns.update_time = datetime.now()
 
         # Clear out_of_sync metric
-        metrics.zone_out_of_sync.labels(
+        metrics.zone_propagation_out_of_sync_seconds.labels(
             zone=self.name,
             nameserver=ns.dns_name,
-            serial=str(primary_serial),
         ).set(0)
 
         # Record final propagation delay
@@ -118,7 +119,6 @@ class ZoneConfig(object):
         metrics.zone_propagation_delay.labels(
             zone=self.name,
             nameserver=ns.dns_name,
-            serial=str(primary_serial),
         ).set(propagation_delay)
         logger.debug(
             "Zone %s: %s propagation delay: %.2f seconds",
@@ -143,6 +143,10 @@ class ZoneConfig(object):
             self.name, ns.name_server
         )
         downstream_serial = DNSChecker.resolve_soa_serial(self.name, ns.name_server)
+        metrics.zone_propagation_serial.labels(
+            nameserver=ns.name_server,
+            zone=self.name,
+        ).set(downstream_serial if downstream_serial is not None else 0)
 
         if downstream_serial is None:
             logger.warning(
@@ -205,10 +209,9 @@ class ZoneConfig(object):
             if self.synced:
                 # Ensure all out_of_sync metrics are zeroed
                 for ns in self.downstream_nameservers:
-                    metrics.zone_out_of_sync.labels(
+                    metrics.zone_propagation_out_of_sync_seconds.labels(
                         zone=self.name,
                         nameserver=ns.dns_name,
-                        serial=str(primary_serial),
                     ).set(0)
                 logger.info("Zone %s fully propagated to all downstream nameservers", self.name)
                 break
