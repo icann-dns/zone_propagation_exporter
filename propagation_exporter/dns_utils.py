@@ -50,6 +50,7 @@ class DNSChecker(object):
         Returns:
             The first IPv4 address as a string, or None if not available.
         """
+        hostname = f"{hostname}." if not hostname.endswith(".") else hostname
         resolver = dns.resolver.Resolver(configure=nameserver is None)
         if nameserver:
             resolver.nameservers = [nameserver]
@@ -107,6 +108,7 @@ class DNSChecker(object):
         Returns:
             The SOA serial as an integer, or None if not available.
         """
+        zone = f"{zone}." if not zone.endswith(".") else zone
         resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = [nameserver]
         resolver.port = port
