@@ -366,4 +366,62 @@ def test_start_propagation_check_restarts_dead_thread():
         assert zm.workers["example.com."] != dead_thread
 
 
+def test_check_nameserver_serial_downstream_behind():
+    """Test _check_nameserver_serial when downstream serial is behind primary."""
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        # Set up zone config
+        primary_ns = ZoneInfo(name="example.com.", serial=100, update_time=datetime.now(), dns_name="192.0.2.1")
+        downstream_ns = ZoneInfo(name="example.com.", serial=90, update_time=datetime.now(), dns_name="192.0.2.2")
+        zc = ZoneConfig(name="example.com.", primary_nameserver=primary_ns, downstream_nameservers=[downstream_ns])
+
+        primary_serial = 100
+        primary_update_time = datetime.now() - timedelta(seconds=30)
+        current_time = datetime.now()
+
+        # Mock the DNS checker to return a lower serial
+        with patch("propagation_exporter.zone.DNSChecker.resolve_soa_serial", return_value=90):
+            with patch("propagation_exporter.zone.metrics"):
+                result = zc._check_nameserver_serial(downstream_ns, primary_serial, primary_update_time, current_time)
+                assert result is True  # Still propagating
+                assert downstream_ns.serial == 90
+
+
+def test_check_nameserver_serial_synced():
+    """Test _check_nameserver_serial when downstream serial matches primary."""
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        # Set up zone config
+        primary_ns = ZoneInfo(name="example.com.", serial=100, update_time=datetime.now(), dns_name="192.0.2.1")
+        downstream_ns = ZoneInfo(name="example.com.", serial=90, update_time=datetime.now(), dns_name="192.0.2.2")
+        zc = ZoneConfig(name="example.com.", primary_nameserver=primary_ns, downstream_nameservers=[downstream_ns])
+
+        primary_serial = 100
+        primary_update_time = datetime.now() - timedelta(seconds=30)
+        current_time = datetime.now()
+
+        # Mock the DNS checker to return matching serial
+        with patch("propagation_exporter.zone.DNSChecker.resolve_soa_serial", return_value=100):
+            with patch("propagation_exporter.zone.metrics"):
+                result = zc._check_nameserver_serial(downstream_ns, primary_serial, primary_update_time, current_time)
+                assert result is False  # Not propagating (synced)
+
+
+def test_check_nameserver_serial_ahead():
+    """Test _check_nameserver_serial when downstream serial is ahead of primary."""
+    with patch("propagation_exporter.zone.DNSChecker.resolve_a_record", return_value=None):
+        # Set up zone config
+        primary_ns = ZoneInfo(name="example.com.", serial=100, update_time=datetime.now(), dns_name="192.0.2.1")
+        downstream_ns = ZoneInfo(name="example.com.", serial=90, update_time=datetime.now(), dns_name="192.0.2.2")
+        zc = ZoneConfig(name="example.com.", primary_nameserver=primary_ns, downstream_nameservers=[downstream_ns])
+
+        primary_serial = 100
+        primary_update_time = datetime.now() - timedelta(seconds=30)
+        current_time = datetime.now()
+
+        # Mock the DNS checker to return a higher serial
+        with patch("propagation_exporter.zone.DNSChecker.resolve_soa_serial", return_value=110):
+            with patch("propagation_exporter.zone.metrics"):
+                result = zc._check_nameserver_serial(downstream_ns, primary_serial, primary_update_time, current_time)
+                assert result is False  # Not propagating (assumed synced)
+
+
 
