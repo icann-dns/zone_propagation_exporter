@@ -144,7 +144,7 @@ class ZoneConfig(object):
         )
         downstream_serial = DNSChecker.resolve_soa_serial(self.name, ns.name_server)
         metrics.zone_propagation_serial.labels(
-            nameserver=ns.name_server,
+            nameserver=ns.dns_name,
             zone=self.name,
         ).set(int(downstream_serial) if downstream_serial is not None else 0)
 
